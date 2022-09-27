@@ -1,10 +1,11 @@
 import abc
 import logging
+
 from six import with_metaclass
 
 logger = logging.getLogger(__name__)
 
-DEFAULT = "android"
+DEFAULT = "ios"
 
 
 class YowsupEnvType(abc.ABCMeta):
@@ -59,6 +60,16 @@ class YowsupEnv(with_metaclass(YowsupEnvType, object)):
             cls.setEnv(env)
         return cls.__CURR
 
+    @classmethod
+    def getAndroidEnv(cls):
+        env = "android"
+        envs = cls.getRegisteredEnvs()
+        if env not in envs:
+            env = envs[0]
+        logger.debug("Env not set, setting it to %s" % env)
+        cls.setEnv(env)
+        return cls.__CURR
+
     @abc.abstractmethod
     def getToken(self, phoneNumber):
         pass
@@ -92,5 +103,5 @@ class YowsupEnv(with_metaclass(YowsupEnvType, object)):
             OS_NAME=self.getOSName(),
             OS_VERSION=self.getOSVersion(),
             MANUFACTURER=self.getManufacturer(),
-            DEVICE_NAME=self.getDeviceName()
+            DEVICE_NAME=self.getDeviceName(),
         )

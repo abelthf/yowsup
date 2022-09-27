@@ -1,24 +1,25 @@
-from yowsup.layers.noise.workers.handshake import WANoiseProtocolHandshakeWorker
-from yowsup.layers import YowLayer, EventCallback
-from yowsup.layers.auth.layer_authentication import YowAuthenticationProtocolLayer
-from yowsup.layers.network.layer import YowNetworkLayer
-from yowsup.layers.noise.layer_noise_segments import YowNoiseSegmentsLayer
-from yowsup.config.manager import ConfigManager
-from yowsup.env.env import YowsupEnv
-from yowsup.layers import YowLayerEvent
-from yowsup.structs.protocoltreenode import ProtocolTreeNode
-from yowsup.layers.coder.encoder import WriteEncoder
-from yowsup.layers.coder.tokendictionary import TokenDictionary
+import logging
+import threading
 
-from consonance.protocol import WANoiseProtocol
 from consonance.config.client import ClientConfig
 from consonance.config.useragent import UserAgentConfig
-from consonance.streams.segmented.blockingqueue import BlockingQueueSegmentedStream
+from consonance.protocol import WANoiseProtocol
+from consonance.streams.segmented.blockingqueue import \
+    BlockingQueueSegmentedStream
 from consonance.structs.keypair import KeyPair
 
-import threading
-import logging
-
+from yowsup.config.manager import ConfigManager
+from yowsup.env.env import YowsupEnv
+from yowsup.layers import EventCallback, YowLayer, YowLayerEvent
+from yowsup.layers.auth.layer_authentication import \
+    YowAuthenticationProtocolLayer
+from yowsup.layers.coder.encoder import WriteEncoder
+from yowsup.layers.coder.tokendictionary import TokenDictionary
+from yowsup.layers.network.layer import YowNetworkLayer
+from yowsup.layers.noise.layer_noise_segments import YowNoiseSegmentsLayer
+from yowsup.layers.noise.workers.handshake import \
+    WANoiseProtocolHandshakeWorker
+from yowsup.structs.protocoltreenode import ProtocolTreeNode
 
 logger = logging.getLogger(__name__)
 try:
@@ -29,8 +30,8 @@ except ImportError:
 
 class YowNoiseLayer(YowLayer):
     DEFAULT_PUSHNAME = "yowsup"
-    HEADER = b'WA\x04\x00'
-    EDGE_HEADER = b'ED\x00\x01'
+    HEADER = b"WA\x04\x00"
+    EDGE_HEADER = b"ED\x00\x01"
     EVENT_HANDSHAKE_FAILED = "org.whatsapp.yowsup.layer.noise.event.handshake_failed"
 
     def __init__(self):
@@ -40,7 +41,9 @@ class YowNoiseLayer(YowLayer):
         )  # type: WANoiseProtocol
 
         self._handshake_worker = None
-        self._stream = BlockingQueueSegmentedStream()  # type: BlockingQueueSegmentedStream
+        self._stream = (
+            BlockingQueueSegmentedStream()
+        )  # type: BlockingQueueSegmentedStream
         self._read_buffer = bytearray()
         self._flush_lock = threading.Lock()
         self._incoming_segments_queue = Queue.Queue()
@@ -64,18 +67,20 @@ class YowNoiseLayer(YowLayer):
         username = int(self._profile.username)
 
         if local_static is None:
-            logger.error("client_static_keypair is not defined in specified config, disconnecting")
+            logger.error(
+                "client_static_keypair is not defined in specified config, disconnecting"
+            )
             self.broadcastEvent(
                 YowLayerEvent(
                     YowNetworkLayer.EVENT_STATE_DISCONNECT,
-                    reason="client_static_keypair is not defined in specified config"
+                    reason="client_static_keypair is not defined in specified config",
                 )
             )
         else:
             if type(local_static) is bytes:
                 local_static = KeyPair.from_bytes(local_static)
             assert type(local_static) is KeyPair, type(local_static)
-            passive = event.getArg('passive')
+            passive = event.getArg("passive")
 
             self.setProp(YowNoiseSegmentsLayer.PROP_ENABLED, False)
 
@@ -91,13 +96,24 @@ class YowNoiseLayer(YowLayer):
             remote_static = config.server_static_public
 
             self._rs = remote_static
-            yowsupenv = YowsupEnv.getCurrent()
+            yowsupenv = YowsupEnv.getAndroidEnv()
+
+            ##prepare os version
+            version_str = yowsupenv.getVersion()
+            version_list = version_str.split(".")
+            if len(version_list) > 3:
+                version_str = "%s.%s.%s" % (
+                    version_list[0],
+                    version_list[1],
+                    version_list[2],
+                )
+
             client_config = ClientConfig(
                 username=username,
                 passive=passive,
                 useragent=UserAgentConfig(
                     platform=0,
-                    app_version=yowsupenv.getVersion(),
+                    app_version=version_str,
                     mcc=config.mcc or "000",
                     mnc=config.mnc or "000",
                     os_version=yowsupenv.getOSVersion(),
@@ -106,16 +122,23 @@ class YowNoiseLayer(YowLayer):
                     os_build_number=yowsupenv.getOSVersion(),
                     phone_id=config.fdid or "",
                     locale_lang="en",
-                    locale_country="US"
+                    locale_country="US",
                 ),
                 pushname=config.pushname or self.DEFAULT_PUSHNAME,
-                short_connect=True
+                short_connect=True,
             )
             if not self._in_handshake():
-                logger.debug("Performing handshake [username= %d, passive=%s]" % (username, passive) )
+                logger.debug(
+                    "Performing handshake [username= %d, passive=%s]"
+                    % (username, passive)
+                )
                 self._handshake_worker = WANoiseProtocolHandshakeWorker(
-                    self._wa_noiseprotocol, self._stream, client_config, local_static, remote_static,
-                    self.on_handshake_finished
+                    self._wa_noiseprotocol,
+                    self._stream,
+                    client_config,
+                    local_static,
+                    remote_static,
+                    self.on_handshake_finished,
                 )
                 logger.debug("Starting handshake worker")
                 self._stream.set_events_callback(self._handle_stream_event)
@@ -125,7 +148,7 @@ class YowNoiseLayer(YowLayer):
         # type: (Exception) -> None
         if e is not None:
             self.emitEvent(YowLayerEvent(self.EVENT_HANDSHAKE_FAILED, reason=e))
-            data=WriteEncoder(TokenDictionary()).protocolTreeNodeToBytes(
+            data = WriteEncoder(TokenDictionary()).protocolTreeNodeToBytes(
                 ProtocolTreeNode("failure", {"reason": str(e)})
             )
             self.toUpper(data)
